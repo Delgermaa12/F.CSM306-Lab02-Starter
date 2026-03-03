@@ -2,6 +2,10 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <atomic>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -36,6 +40,8 @@ public:
     TaskID runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
                             const std::vector<TaskID> &deps);
     void sync();
+private:
+    int nthreads;
 };
 
 /*
@@ -54,7 +60,21 @@ public:
     TaskID runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
                             const std::vector<TaskID> &deps);
     void sync();
+
+private:
+    int nthreads;
+    std::vector<std::thread> workers;
+    std::atomic<bool> shutdownFlag{false};
+    std::atomic<bool> hasWork{false};
+    std::atomic<int> nextTask{0};
+    std::atomic<int> totalTasks{0};
+    std::atomic<int> doneCount{0};
+
+    IRunnable *currentRunnable{nullptr};
+
+    void workerLoop(int tid);
 };
+
 
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
@@ -72,6 +92,21 @@ public:
     TaskID runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
                             const std::vector<TaskID> &deps);
     void sync();
+private:
+    int nthreads;
+    std::vector<std::thread> workers;
+    std::atomic<bool> shutdownFlag{false};
+    IRunnable *currentRunnable{nullptr};
+    int total{0};
+    int next{0};
+    int done{0};
+
+    std::mutex mtx;
+    std::condition_variable cvWork;
+    std::condition_variable cvDone;
+    bool workAvailable{false};
+
+    void workerLoop(int tid);
 };
 
 #endif
