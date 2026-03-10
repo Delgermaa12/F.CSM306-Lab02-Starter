@@ -258,40 +258,106 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping()
 {
-    //
+        //
     // TODO: CSM306 student implementations may decide to perform cleanup
     // operations (such as thread pool shutdown construction) here.
     // Implementations are free to add new class member variables
     // (requiring changes to tasksys.h).
     //
     {std::lock_guard<std::mutex> lk(mtx);
-    shutdownFlag.store(true, std::memory_order_release);
-workAvailable=true;
-    }
+        shutdownFlag.store(true, std::memory_order_release);}
     cvWork.notify_all();
-    for(auto &th: workers) th.join();
+
+    for(auto &th : workers) {
+        if (th.joinable()) th.join();
+    }
 }
 void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
-    while(true){
-        IRunnable *r;
-        int id, total_tasks=0;
+    // while(true){
+    //     IRunnable *r;
+    //     int id, total_tasks=0;
+    //     {
+    //         std::unique_lock<std::mutex> lk(mtx);
+    //         cvWork.wait(lk, [this](){ 
+    //             return shutdownFlag.load(std::memory_order_acquire) || (workAvailable && next< total); });
+    //         if(shutdownFlag.load(std::memory_order_acquire)) return;
+    //         r=currentRunnable;
+    //         id=next++;
+    //         total_tasks= total;
+    //     }
+    //         r->runTask(id, total_tasks);
+    //         std::lock_guard<std::mutex> lk(mtx);
+    //         done++;
+    //         if(done>=total){
+    //             workAvailable=false;
+    //             cvDone.notify_all();
+    //         }
+    // }
+
+    //B daalgvr code
+    while (true) {
+        IRunnable *r = nullptr;
+        int task_index = -1;
+        int total_tasks = 0;
+        TaskID launch_id = 0;
+
         {
             std::unique_lock<std::mutex> lk(mtx);
-            cvWork.wait(lk, [this](){ 
-                return shutdownFlag.load(std::memory_order_acquire) || (workAvailable && next< total); });
-            if(shutdownFlag.load(std::memory_order_acquire)) return;
-            r=currentRunnable;
-            id=next++;
-            total_tasks= total;
-        }
-            r->runTask(id, total_tasks);
-            std::lock_guard<std::mutex> lk(mtx);
-            done++;
-            if(done>=total){
-                workAvailable=false;
-                cvDone.notify_all();
+
+            cvWork.wait(lk, [this]() {
+                return shutdownFlag.load(std::memory_order_acquire) || !readyQueue.empty();
+            });
+
+            if (shutdownFlag.load(std::memory_order_acquire))
+                return;
+
+            launch_id = readyQueue.front();
+            readyQueue.pop_front();
+
+            TaskLaunch &launch=launches[launch_id];
+
+            task_index = launch.next_task;
+            launch.next_task++;
+
+            r = launch.runnable;
+            total_tasks = launch.num_total_tasks;
+
+            if (launch.next_task < launch.num_total_tasks) {
+                readyQueue.push_back(launch_id);
+                cvWork.notify_one();
             }
+        }
+
+        r->runTask(task_index, total_tasks);
+
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+
+            TaskLaunch &launch=launches[launch_id];
+            launch.done_tasks++;
+
+            if (launch.done_tasks==launch.num_total_tasks) {
+                launch.finished = true;
+                unfinishedLaunches--;
+
+                for (TaskID dep_id: launch.dependents) {
+                    TaskLaunch &dep_launch= launches[dep_id];
+                    dep_launch.remaining_deps--;
+
+                    if (dep_launch.remaining_deps== 0) {
+                        readyQueue.push_back(dep_id);
+                    }
+                }
+
+                cvWork.notify_all();
+
+                if (unfinishedLaunches == 0) {
+                    cvDone.notify_all();
+                }
+            }
+        }
     }
+
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable, int num_total_tasks)
@@ -303,25 +369,30 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable, int num_tota
     // tasks sequentially on the calling thread.
     //
 
-    // for (int i = 0; i < num_total_tasks; i++)
+    // for (int i = 0; i<num_total_tasks; i++)
     // {
     //     runnable->runTask(i, num_total_tasks);
     // }
 
-    if(num_total_tasks<=0) return;
-    {
-        std::lock_guard<std::mutex> lk(mtx);
-        currentRunnable=runnable;
-        next=0;
-        done=0;
-        total=num_total_tasks;
-        workAvailable=true;
-    }
-    cvWork.notify_all();
-    {
-        std::unique_lock<std::mutex> lk(mtx);
-        cvDone.wait(lk, [this](){ return done>=total; });
-    }
+    //A daalgvr code
+    // if(num_total_tasks<=0) return;
+    // {
+    //     std::lock_guard<std::mutex> lk(mtx);
+    //     currentRunnable=runnable;
+    //     next=0;
+    //     done=0;
+    //     total=num_total_tasks;
+    //     workAvailable=true;
+    // }
+    // cvWork.notify_all();
+    // {
+    //     std::unique_lock<std::mutex> lk(mtx);
+    //     cvDone.wait(lk, [this](){ return done>=total; });
+    // }
+
+    //B daalgvr code
+    runAsyncWithDeps(runnable, num_total_tasks, {});
+    sync();
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
@@ -332,7 +403,52 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnabl
     // TODO: CSM306 students will implement this method in Part B.
     //
 
-    return 0;
+    // return 0;
+    //B daalgvr code
+    std::lock_guard<std::mutex> lk(mtx);
+
+    TaskID id = nextLaunchID++;
+    TaskLaunch launch;
+    launch.id = id;
+    launch.runnable = runnable;
+    launch.num_total_tasks = num_total_tasks;
+    launch.next_task = 0;
+    launch.done_tasks = 0;
+    launch.remaining_deps = (int)deps.size();
+    launch.finished = false;
+
+    launches[id] = launch;
+    unfinishedLaunches++;
+
+    for (TaskID dep : deps) {
+        launches[dep].dependents.push_back(id);
+    }
+
+    if (launches[id].remaining_deps == 0) {
+        if (launches[id].num_total_tasks == 0) {
+            launches[id].finished = true;
+            unfinishedLaunches--;
+
+            for (TaskID dep_id : launches[id].dependents) {
+                TaskLaunch &dep_launch = launches[dep_id];
+                dep_launch.remaining_deps--;
+                if (dep_launch.remaining_deps == 0) {
+                    readyQueue.push_back(dep_id);
+                }
+            }
+
+            if (unfinishedLaunches == 0) {
+                cvDone.notify_all();
+            }
+
+            cvWork.notify_all();
+        } else {
+            readyQueue.push_back(id);
+            cvWork.notify_all();
+        }
+    }
+
+    return id;
 }
 
 void TaskSystemParallelThreadPoolSleeping::sync()
@@ -342,5 +458,10 @@ void TaskSystemParallelThreadPoolSleeping::sync()
     // TODO: CSM306 students will modify the implementation of this method in Part B.
     //
 
-    return;
+    // return;
+    //B daalgvr code
+    std::unique_lock<std::mutex> lk(mtx);
+    cvDone.wait(lk, [this]() {
+        return unfinishedLaunches == 0;
+    });
 }
