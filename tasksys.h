@@ -104,11 +104,11 @@ private:
     std::vector<std::thread> workers;
     std::atomic<bool> shutdownFlag{false};
 
-//     IRunnable *currentRunnable{nullptr};
-// int total{0};
-// int next{0};
-// int done{0};
-// bool workAvailable{false};
+    // IRunnable *currentRunnable{nullptr};
+    // int total{0};
+    // int next{0};
+    // int done{0};
+    // bool workAvailable{false};
     std::mutex mtx;
     std::condition_variable cvWork;
     std::condition_variable cvDone;

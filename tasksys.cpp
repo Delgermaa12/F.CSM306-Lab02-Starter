@@ -30,7 +30,7 @@ TaskSystemSerial::~TaskSystemSerial() {}
 
 void TaskSystemSerial::run(IRunnable *runnable, int num_total_tasks)
 {
-    for (int i = 0; i < num_total_tasks; i++)
+    for (int i=0; i<num_total_tasks; i++)
     {
         runnable->runTask(i, num_total_tasks);
     }
@@ -102,6 +102,7 @@ void TaskSystemParallelSpawn::run(IRunnable *runnable, int num_total_tasks)
 
     int use_threads=nthreads;
     if (use_threads<=0) use_threads= 1;
+    int mid = num_total_tasks / 2;
 
     std::vector<std::thread> ts;
     ts.reserve(use_threads);
@@ -110,7 +111,7 @@ void TaskSystemParallelSpawn::run(IRunnable *runnable, int num_total_tasks)
     {
         ts.emplace_back([=]() {
             int start=(num_total_tasks *t) /use_threads;
-            int end  =(num_total_tasks* (t+1))/ use_threads;
+            int end  =(num_total_tasks*(t+1))/ use_threads;
 
             for (int i=start; i<end; i++)
             {
@@ -119,6 +120,29 @@ void TaskSystemParallelSpawn::run(IRunnable *runnable, int num_total_tasks)
         });
     }
     for (auto &th :ts) th.join();
+
+    {
+        std::vector<std::thread> ts;
+        ts.reserve(use_threads);
+
+        int second_count = num_total_tasks - mid;
+
+        for (int t = 0; t < use_threads; t++) {
+            ts.emplace_back([=]() {
+                int local_start = (second_count * t) / use_threads;
+                int local_end   = (second_count * (t + 1)) / use_threads;
+
+                int start = mid + local_start;
+                int end   = mid + local_end;
+
+                for (int i = start; i < end; i++) {
+                    runnable->runTask(i, num_total_tasks);
+                }
+            });
+        }
+
+        for (auto &th : ts) th.join();
+    }
 
 }
 
@@ -272,7 +296,9 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping()
         if (th.joinable()) th.join();
     }
 }
+
 void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
+
     // while(true){
     //     IRunnable *r;
     //     int id, total_tasks=0;
@@ -293,9 +319,9 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
     //             cvDone.notify_all();
     //         }
     // }
-
-    //B daalgvr code
+    //B daalgvr
     while (true) {
+
         IRunnable *r = nullptr;
         int task_index = -1;
         int total_tasks = 0;
@@ -314,7 +340,7 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
             launch_id = readyQueue.front();
             readyQueue.pop_front();
 
-            TaskLaunch &launch=launches[launch_id];
+            TaskLaunch &launch = launches[launch_id];
 
             task_index = launch.next_task;
             launch.next_task++;
@@ -337,6 +363,7 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
             launch.done_tasks++;
 
             if (launch.done_tasks==launch.num_total_tasks) {
+
                 launch.finished = true;
                 unfinishedLaunches--;
 
@@ -357,8 +384,8 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
             }
         }
     }
-
 }
+
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable, int num_total_tasks)
 {
@@ -395,8 +422,10 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable, int num_tota
     sync();
 }
 
-TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
-                                                              const std::vector<TaskID> &deps)
+TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(
+        IRunnable *runnable,
+        int num_total_tasks,
+        const std::vector<TaskID> &deps)
 {
 
     //
@@ -408,13 +437,14 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnabl
     std::lock_guard<std::mutex> lk(mtx);
 
     TaskID id = nextLaunchID++;
+
     TaskLaunch launch;
     launch.id = id;
     launch.runnable = runnable;
     launch.num_total_tasks = num_total_tasks;
     launch.next_task = 0;
     launch.done_tasks = 0;
-    launch.remaining_deps = (int)deps.size();
+    launch.remaining_deps = deps.size();
     launch.finished = false;
 
     launches[id] = launch;
@@ -440,11 +470,9 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnabl
             if (unfinishedLaunches == 0) {
                 cvDone.notify_all();
             }
-
-            cvWork.notify_all();
         } else {
             readyQueue.push_back(id);
-            cvWork.notify_all();
+            cvWork.notify_one();
         }
     }
 
@@ -453,7 +481,6 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable *runnabl
 
 void TaskSystemParallelThreadPoolSleeping::sync()
 {
-
     //
     // TODO: CSM306 students will modify the implementation of this method in Part B.
     //
