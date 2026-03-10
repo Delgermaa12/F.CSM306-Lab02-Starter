@@ -62,8 +62,19 @@ int main()
     delete serialSystem;
 
     // 2. Parallel Spawn System (Step 1)
+    ITaskSystem *parallelSpawnSystem = new TaskSystemParallelSpawn(num_threads);
+    runBenchmark(parallelSpawnSystem, &task, num_tasks, "Parallel Spawn System");
+    delete parallelSpawnSystem;
     // 3. Parallel Spinning System (Step 2)
+
+    ITaskSystem *parallelSpinningSystem = new TaskSystemParallelThreadPoolSpinning(num_threads);
+    runBenchmark(parallelSpinningSystem, &task, num_tasks, "Parallel Spinning System");
+    delete parallelSpinningSystem;
     // 4. Parallel Sleeping System (Step 3)
+
+    ITaskSystem *parallelSleepingSystem = new TaskSystemParallelThreadPoolSleeping(num_threads);
+    runBenchmark(parallelSleepingSystem, &task, num_tasks, "Parallel Sleeping System");
+    delete parallelSleepingSystem;
 
     return 0;
 }

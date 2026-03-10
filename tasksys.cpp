@@ -80,25 +80,45 @@ void TaskSystemParallelSpawn::run(IRunnable *runnable, int num_total_tasks)
     // method in Part A.  The implementation provided below runs all
     // tasks sequentially on the calling thread.
     //
-    std::atomic<int> next(0);
+    // std::atomic<int> next(0);
+    // int use_threads=nthreads;
+    // if(use_threads<=0) use_threads=1;
+    // std::vector<std::thread> ts;
+    // ts.reserve(use_threads);
+
+    // for(int t= 0; t<use_threads; t++)
+    // {
+    //     ts.emplace_back([&, t]() {
+    //         while(true)
+    //         {
+    //             int id=next.fetch_add(1, std::memory_order_relaxed);
+    //             if(id>= num_total_tasks) break;
+    //             runnable->runTask(id, num_total_tasks);
+    //         }
+    //     });
+    // }
+
+    // for (auto &th: ts) th.join();
+
     int use_threads=nthreads;
-    if(use_threads<=0) use_threads=1;
+    if (use_threads<=0) use_threads= 1;
+
     std::vector<std::thread> ts;
     ts.reserve(use_threads);
 
-    for(int t= 0; t<use_threads; t++)
+    for (int t=0; t<use_threads; t++)
     {
-        ts.emplace_back([&, t]() {
-            while(true)
+        ts.emplace_back([=]() {
+            int start=(num_total_tasks *t) /use_threads;
+            int end  =(num_total_tasks* (t+1))/ use_threads;
+
+            for (int i=start; i<end; i++)
             {
-                int id=next.fetch_add(1, std::memory_order_relaxed);
-                if(id>= num_total_tasks) break;
-                runnable->runTask(id, num_total_tasks);
+                runnable->runTask(i, num_total_tasks);
             }
         });
     }
-
-    for (auto &th: ts) th.join();
+    for (auto &th :ts) th.join();
 
 }
 
@@ -254,24 +274,23 @@ workAvailable=true;
 void TaskSystemParallelThreadPoolSleeping::workerLoop(int tid) {
     while(true){
         IRunnable *r;
-        int id, total;
+        int id, total_tasks=0;
         {
             std::unique_lock<std::mutex> lk(mtx);
-            cvWork.wait(lk, [this](){ return workAvailable || shutdownFlag.load(std::memory_order_acquire); });
+            cvWork.wait(lk, [this](){ 
+                return shutdownFlag.load(std::memory_order_acquire) || (workAvailable && next< total); });
             if(shutdownFlag.load(std::memory_order_acquire)) return;
             r=currentRunnable;
             id=next++;
-            total=this->total;
+            total_tasks= total;
         }
-        if(id<total){
-            r->runTask(id, total);
+            r->runTask(id, total_tasks);
             std::lock_guard<std::mutex> lk(mtx);
             done++;
             if(done>=total){
                 workAvailable=false;
                 cvDone.notify_all();
             }
-        }
     }
 }
 
@@ -302,7 +321,6 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable, int num_tota
     {
         std::unique_lock<std::mutex> lk(mtx);
         cvDone.wait(lk, [this](){ return done>=total; });
-        workAvailable=false;
     }
 }
 

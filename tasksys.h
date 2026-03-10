@@ -1,11 +1,12 @@
 #ifndef _TASKSYS_H
 #define _TASKSYS_H
 
-#include "itasksys.h"
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <vector>
+#include "itasksys.h"
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -74,7 +75,6 @@ private:
 
     void workerLoop(int tid);
 };
-
 
 /*
  * TaskSystemParallelThreadPoolSleeping: This class is the student's
